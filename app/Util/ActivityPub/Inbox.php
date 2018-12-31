@@ -32,7 +32,7 @@ class Inbox
 
     public function handle()
     {
-        $this->authenticatePayload();
+        $this->handleVerb();
     }
 
     public function authenticatePayload()
@@ -142,16 +142,11 @@ class Inbox
         $activity = $this->payload['object'];
         $actor = $this->actorFirstOrCreate($this->payload['actor']);
         $inReplyTo = $activity['inReplyTo'];
+        $url = $activity['id'];
         
-        if(!Helpers::statusFirstOrFetch($activity['url'], true)) {
-            $this->logger->delete();
+        if(!Helpers::statusFirstOrFetch($url, true)) {
             return;
         }
-
-        $this->logger->to_id = $this->profile->id;
-        $this->logger->from_id = $actor->id;
-        $this->logger->processed_at = Carbon::now();
-        $this->logger->save();
     }
 
     public function handleNoteCreate()
@@ -164,32 +159,27 @@ class Inbox
 
         if(Helpers::userInAudience($this->profile, $this->payload) == false) {
             //Log::error('AP:inbox:userInAudience:false - Activity#'.$this->logger->id);
-            $logger = Activity::find($this->logger->id);
-            $logger->delete();
             return;
         }
 
-        if(Status::whereUrl($activity['url'])->exists()) {
+        $url = $activity['id'];
+        if(Status::whereUrl($url)->exists()) {
             return;
         }
 
-        $status = DB::transaction(function() use($activity, $actor) {
+        $status = DB::transaction(function() use($activity, $actor, $url) {
+            $caption = str_limit(strip_tags($activity['content']), config('pixelfed.max_caption_length'));
             $status = new Status;
             $status->profile_id = $actor->id;
-            $status->caption = strip_tags($activity['content']);
+            $status->caption = $caption;
             $status->visibility = $status->scope = 'public';
-            $status->url = $activity['url'];
+            $status->uri = $url;
+            $status->url = $url;
             $status->save();
             return $status;
         });
 
         Helpers::importNoteAttachment($activity, $status);
-
-        $logger = Activity::find($this->logger->id);
-        $logger->to_id = $this->profile->id;
-        $logger->from_id = $actor->id;
-        $logger->processed_at = Carbon::now();
-        $logger->save();
     }
 
     public function handleFollowActivity()
@@ -214,51 +204,64 @@ class Inbox
                 'local_profile' => empty($actor->domain)
             ]);
             if($follower->wasRecentlyCreated == false) {
-                $this->logger->delete();
                 return;
             }
             // send notification
-            $notification = new Notification();
-            $notification->profile_id = $target->id;
-            $notification->actor_id = $actor->id;
-            $notification->action = 'follow';
-            $notification->message = $follower->toText();
-            $notification->rendered = $follower->toHtml();
-            $notification->item_id = $target->id;
-            $notification->item_type = "App\Profile";
-            $notification->save();
+            Notification::firstOrCreate([
+                'profile_id' => $target->id,
+                'actor_id' => $actor->id,
+                'action' => 'follow',
+                'message' => $follower->toText(),
+                'rendered' => $follower->toHtml(),
+                'item_id' => $target->id,
+                'item_type' => 'App\Profile'
+            ]);
 
-            \Cache::forever('notification.'.$notification->id, $notification);
-
-            $redis = Redis::connection();
-
-            $nkey = config('cache.prefix').':user.'.$target->id.'.notifications';
-            $redis->lpush($nkey, $notification->id);
-            
             // send Accept to remote profile
             $accept = [
                 '@context' => 'https://www.w3.org/ns/activitystreams',
-                'id'       => $follower->permalink('/accept'),
+                'id'       => $target->permalink().'#accepts/follows/' . $follower->id,
                 'type'     => 'Accept',
                 'actor'    => $target->permalink(),
                 'object'   => [
-                    'id' => $this->payload['id'],
+                    'id' => $actor->permalink('#follows/'.$target->id),
                     'type'  => 'Follow',
-                    'actor' => $target->permalink(),
-                    'object' => $actor->permalink()
+                    'actor' => $actor->permalink(),
+                    'object' => $target->permalink()
                 ]
             ];
             Helpers::sendSignedObject($target, $actor->inbox_url, $accept);
         }
-        $this->logger->to_id = $target->id;
-        $this->logger->from_id = $actor->id;
-        $this->logger->processed_at = Carbon::now();
-        $this->logger->save();
     }
 
     public function handleAnnounceActivity()
     {
-
+        $actor = $this->actorFirstOrCreate($this->payload['actor']);
+        $activity = $this->payload['object'];
+        if(!$actor || $actor->domain == null) {
+            return;
+        }
+        if(Helpers::validateLocalUrl($activity) == false) {
+            return;
+        }
+        $parent = Helpers::statusFirstOrFetch($activity, true);
+        if(!$parent) {
+            return;
+        }
+        $status = Status::firstOrCreate([
+            'profile_id' => $actor->id,
+            'reblog_of_id' => $parent->id,
+            'type' => 'reply'
+        ]);
+        Notification::firstOrCreate([
+            'profile_id' => $parent->profile->id,
+            'actor_id' => $actor->id,
+            'action' => 'share',
+            'message' => $status->replyToText(),
+            'rendered' => $status->replyToHtml(),
+            'item_id' => $parent->id,
+            'item_type' => 'App\Status'
+        ]);
     }
 
     public function handleAcceptActivity()
@@ -268,7 +271,19 @@ class Inbox
 
     public function handleDeleteActivity()
     {
+        $actor = $this->payload['actor'];
+        $obj = $this->payload['object'];
+        if(is_string($obj) && Helpers::validateUrl($obj)) {
+            // actor object detected
 
+        } else if (is_array($obj) && isset($obj['type']) && $obj['type'] == 'Tombstone') {
+            // tombstone detected
+            $status = Status::whereUri($obj['id'])->first();
+            if($status == null) {
+                return;
+            }
+            $status->forceDelete();
+        }
     }
 
     public function handleLikeActivity()
@@ -289,10 +304,6 @@ class Inbox
             return;
         }
         LikePipeline::dispatch($like);
-        $this->logger->to_id = $status->profile_id;
-        $this->logger->from_id = $profile->id;
-        $this->logger->processed_at = Carbon::now();
-        $this->logger->save();
     }
 
 
@@ -306,19 +317,29 @@ class Inbox
         $actor = $this->payload['actor'];
         $profile = self::actorFirstOrCreate($actor);
         $obj = $this->payload['object'];
-        $status = Helpers::statusFirstOrFetch($obj['object']);
 
         switch ($obj['type']) {
             case 'Like':
+                $status = Helpers::statusFirstOrFetch($obj['object']);
                 Like::whereProfileId($profile->id)
                     ->whereStatusId($status->id)
-                    ->delete();
+                    ->forceDelete();
+                break;
+                
+            case 'Announce':
+                $parent = Helpers::statusFirstOrFetch($obj['object']);
+                $status = Status::whereProfileId($profile->id)
+                    ->whereReblogOfId($parent->id)
+                    ->firstOrFail();
+                Notification::whereProfileId($parent->profile->id)
+                    ->whereActorId($profile->id)
+                    ->whereAction('share')
+                    ->whereItemId($status->id)
+                    ->whereItemType('App\Status')
+                    ->forceDelete();
+                $status->forceDelete();
                 break;
         }
 
-        $this->logger->to_id = $status->profile_id;
-        $this->logger->from_id = $profile->id;
-        $this->logger->processed_at = Carbon::now();
-        $this->logger->save();
     }
 }

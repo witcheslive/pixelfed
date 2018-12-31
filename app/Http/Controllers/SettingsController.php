@@ -5,16 +5,15 @@ namespace App\Http\Controllers;
 use App\AccountLog;
 use App\Following;
 use App\UserFilter;
-use Auth;
-use DB;
-use Cache;
-use Purify;
+use Auth, DB, Cache, Purify;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use App\Http\Controllers\Settings\{
     HomeSettings,
     PrivacySettings,
     SecuritySettings
 };
+use App\Jobs\DeletePipeline\DeleteAccountPipeline;
 
 class SettingsController extends Controller
 {
@@ -43,7 +42,7 @@ class SettingsController extends Controller
           'optimize_screen_reader',
           'high_contrast_mode',
           'video_autoplay',
-      ];
+        ];
         foreach ($fields as $field) {
             $form = $request->input($field);
             if ($form == 'on') {
@@ -129,6 +128,46 @@ class SettingsController extends Controller
     public function developers()
     {
         return view('settings.developers');
+    }
+
+    public function removeAccountTemporary(Request $request)
+    {
+        return view('settings.remove.temporary');
+    }
+
+    public function removeAccountTemporarySubmit(Request $request)
+    {
+        $user = Auth::user();
+        $profile = $user->profile;
+        $user->status = 'disabled';
+        $profile->status = 'disabled';
+        $user->save();
+        $profile->save();
+        Auth::logout();
+        return redirect('/');
+    }
+
+    public function removeAccountPermanent(Request $request)
+    {
+        return view('settings.remove.permanent');
+    }
+
+    public function removeAccountPermanentSubmit(Request $request)
+    {
+        $user = Auth::user();
+        if($user->is_admin == true) {
+            return abort(400, 'You cannot delete an admin account.');
+        }
+        $profile = $user->profile;
+        $ts = Carbon::now()->addMonth();
+        $user->status = 'delete';
+        $profile->status = 'delete';
+        $user->delete_after = $ts;
+        $profile->delete_after = $ts;
+        $user->save();
+        $profile->save();
+        Auth::logout();
+        return redirect('/');
     }
 }
 

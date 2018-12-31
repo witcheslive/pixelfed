@@ -19,9 +19,10 @@ class Status extends Model
      */
     protected $dates = ['deleted_at'];
 
-    protected $fillable = ['profile_id', 'visibility', 'in_reply_to_id', 'reblog_of_id'];
+    protected $fillable = ['profile_id', 'visibility', 'in_reply_to_id', 'reblog_of_id', 'type'];
 
     const STATUS_TYPES = [
+        'text',
         'photo',
         'photo:album',
         'video',
@@ -53,39 +54,33 @@ class Status extends Model
     // todo: deprecate after 0.6.0
     public function viewType()
     {
-        return Cache::remember('status:view-type:'.$this->id, 10080, function() {
-            $this->setType();
-            $media = $this->firstMedia();
-            $mime = explode('/', $media->mime)[0];
-            $count = $this->media()->count();
-            $type = ($mime == 'image') ? 'image' : 'video';
-            if($count > 1) {
-                $type = ($type == 'image') ? 'album' : 'video-album';
-            }
-            return $type;
-        });
+        if($this->type) {
+            return $this->type;
+        }
+        return $this->setType();
     }
 
     // todo: deprecate after 0.6.0
     public function setType()
     {
         if(in_array($this->type, self::STATUS_TYPES)) {
-            return;
+            return $this->type;
         }
         $mimes = $this->media->pluck('mime')->toArray();
         $type = StatusController::mimeTypeCheck($mimes);
         if($type) {
             $this->type = $type;
             $this->save();
+            return $type;
         }
     }
 
     public function thumb($showNsfw = false)
     {
         return Cache::remember('status:thumb:'.$this->id, 40320, function() use ($showNsfw) {
-            $type = $this->viewType();
+            $type = $this->type ?? $this->setType();
             $is_nsfw = !$showNsfw ? $this->is_nsfw : false;
-            if ($this->media->count() == 0 || $is_nsfw || !in_array($type,['image', 'album', 'video'])) {
+            if ($this->media->count() == 0 || $is_nsfw || !in_array($type,['photo', 'photo:album'])) {
                 return 'data:image/gif;base64,R0lGODlhAQABAIAAAMLCwgAAACH5BAAAAAAALAAAAAABAAEAAAICRAEAOw==';
             }
 
@@ -95,10 +90,13 @@ class Status extends Model
 
     public function url()
     {
+        if($this->uri) {
+            return $this->uri;
+        }
         $id = $this->id;
         $username = $this->profile->username;
-        $path = config('app.url')."/p/{$username}/{$id}";
-        return url($path);
+        $path = url(config('app.url')."/p/{$username}/{$id}");
+        return $path;
     }
 
     public function permalink($suffix = '/activity')

@@ -42,7 +42,6 @@ class StatusEntityLexer implements ShouldQueue
      */
     public function handle()
     {
-        $status = $this->status;
         $this->parseEntities();
     }
 

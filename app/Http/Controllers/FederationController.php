@@ -14,6 +14,7 @@ use Carbon\Carbon;
 use Illuminate\Http\Request;
 use League\Fractal;
 use App\Util\ActivityPub\Helpers;
+use App\Util\ActivityPub\HttpSignature;
 
 class FederationController extends Controller
 {
@@ -47,8 +48,8 @@ class FederationController extends Controller
     {
         $this->authCheck();
         $this->validate($request, [
-        'url' => 'required|string',
-      ]);
+            'url' => 'required|string',
+        ]);
 
         if (config('pixelfed.remote_follow_enabled') !== true) {
             abort(403);
@@ -113,23 +114,24 @@ class FederationController extends Controller
         ];
         });
 
-        return response()->json($res, 200, [], JSON_PRETTY_PRINT);
+        return response()->json($res, 200, [
+            'Access-Control-Allow-Origin' => '*'
+        ]);
     }
 
     public function webfinger(Request $request)
     {
         $this->validate($request, ['resource'=>'required|string|min:3|max:255']);
 
-        $hash = hash('sha256', $request->input('resource'));
-
-        $webfinger = Cache::remember('api:webfinger:'.$hash, 1440, function () use ($request) {
-            $resource = $request->input('resource');
-            $parsed = Nickname::normalizeProfileUrl($resource);
-            $username = $parsed['username'];
-            $user = Profile::whereUsername($username)->firstOrFail();
-
-            return (new Webfinger($user))->generate();
-        });
+        $resource = $request->input('resource');
+        $hash = hash('sha256', $resource);
+        $parsed = Nickname::normalizeProfileUrl($resource);
+        $username = $parsed['username'];
+        $profile = Profile::whereUsername($username)->firstOrFail();
+        if($profile->status != null) {
+            return ProfileController::accountCheck($profile);
+        }
+        $webfinger = (new Webfinger($profile))->generate();
 
         return response()->json($webfinger, 200, [], JSON_PRETTY_PRINT);
     }
@@ -153,13 +155,16 @@ XML;
             abort(403);
         }
 
-        $user = Profile::whereNull('remote_url')->whereUsername($username)->firstOrFail();
-        if($user->is_private) {
+        $profile = Profile::whereNull('remote_url')->whereUsername($username)->firstOrFail();
+        if($profile->status != null) {
+            return ProfileController::accountCheck($profile);
+        }
+        if($profile->is_private) {
             return response()->json(['error'=>'403', 'msg' => 'private profile'], 403);
         }
-        $timeline = $user->statuses()->whereVisibility('public')->orderBy('created_at', 'desc')->paginate(10);
+        $timeline = $profile->statuses()->whereVisibility('public')->orderBy('created_at', 'desc')->paginate(10);
         $fractal = new Fractal\Manager();
-        $resource = new Fractal\Resource\Item($user, new ProfileOutbox());
+        $resource = new Fractal\Resource\Item($profile, new ProfileOutbox());
         $res = $fractal->createData($resource)->toArray();
 
         return response(json_encode($res['data']))->header('Content-Type', 'application/activity+json');
@@ -167,7 +172,84 @@ XML;
 
     public function userInbox(Request $request, $username)
     {
-        // todo
+        if (config('pixelfed.activitypub_enabled') == false) {
+            abort(403);
+        }
+
+        $profile = Profile::whereNull('domain')->whereUsername($username)->firstOrFail();
+        if($profile->status != null) {
+            return ProfileController::accountCheck($profile);
+        }
+        $body = $request->getContent();
+        $bodyDecoded = json_decode($body, true, 8);
+        if($this->verifySignature($request, $profile) == true) {
+            InboxWorker::dispatch($request->headers->all(), $profile, $bodyDecoded);
+        } else if($this->blindKeyRotation($request, $profile) == true) {
+            InboxWorker::dispatch($request->headers->all(), $profile, $bodyDecoded);
+        } else {
+            abort(400, 'Bad Signature');
+        }
+        return;
+    }
+
+    protected function verifySignature(Request $request, Profile $profile)
+    {
+        $body = $request->getContent();
+        $bodyDecoded = json_decode($body, true, 8);
+        $signature = $request->header('signature');
+        if(!$signature) {
+            abort(400, 'Missing signature header');
+        }
+        $signatureData = HttpSignature::parseSignatureHeader($signature);
+        $keyId = Helpers::validateUrl($signatureData['keyId']);
+        $id = Helpers::validateUrl($bodyDecoded['id']);
+        $keyDomain = parse_url($keyId, PHP_URL_HOST);
+        $idDomain = parse_url($id, PHP_URL_HOST);
+        if(isset($bodyDecoded['object']) 
+            && is_array($bodyDecoded['object'])
+            && isset($bodyDecoded['object']['attributedTo'])
+        ) {
+            if(parse_url($bodyDecoded['object']['attributedTo'], PHP_URL_HOST) !== $keyDomain) {
+                abort(400, 'Invalid request');
+            }
+        }
+        if(!$keyDomain || !$idDomain || $keyDomain !== $idDomain) {
+            abort(400, 'Invalid request');
+        }
+        $actor = Profile::whereKeyId($keyId)->first();
+        if(!$actor) {
+            $actor = Helpers::profileFirstOrNew($bodyDecoded['actor']);
+        }
+        $pkey = openssl_pkey_get_public($actor->public_key);
+        $inboxPath = "/users/{$profile->username}/inbox";
+        list($verified, $headers) = HTTPSignature::verify($pkey, $signatureData, $request->headers->all(), $inboxPath, $body);
+        if($verified == 1) { 
+            return true;
+        } else {
+            return false;
+        }
+    }
+
+    protected function blindKeyRotation(Request $request, Profile $profile)
+    {
+        $signature = $request->header('signature');
+        if(!$signature) {
+            abort(400, 'Missing signature header');
+        }
+        $signatureData = HttpSignature::parseSignatureHeader($signature);
+        $keyId = Helpers::validateUrl($signatureData['keyId']);
+        $actor = Profile::whereKeyId($keyId)->first();
+        $res = Zttp::timeout(5)->withHeaders([
+          'Accept'     => 'application/ld+json; profile="https://www.w3.org/ns/activitystreams"',
+          'User-Agent' => 'PixelFedBot v0.1 - https://pixelfed.org',
+        ])->get($actor->remote_url);
+        $res = json_decode($res->body(), true, 8);
+        if($res['publicKey']['id'] !== $actor->key_id) {
+            return false;
+        }
+        $actor->public_key = $res['publicKey']['publicKeyPem'];
+        $actor->save();
+        return $this->verifySignature($request, $profile);
     }
 
     public function userFollowing(Request $request, $username)
@@ -175,7 +257,13 @@ XML;
         if (config('pixelfed.activitypub_enabled') == false) {
             abort(403);
         }
-        $profile = Profile::whereNull('remote_url')->whereUsername($username)->firstOrFail();
+        $profile = Profile::whereNull('remote_url')
+            ->whereUsername($username)
+            ->whereIsPrivate(false)
+            ->firstOrFail();
+        if($profile->status != null) {
+            return ProfileController::accountCheck($profile);
+        }
         $obj = [
             '@context' => 'https://www.w3.org/ns/activitystreams',
             'id'       => $request->getUri(),
@@ -193,7 +281,13 @@ XML;
         if (config('pixelfed.activitypub_enabled') == false) {
             abort(403);
         }
-        $profile = Profile::whereNull('remote_url')->whereUsername($username)->firstOrFail();
+        $profile = Profile::whereNull('remote_url')
+            ->whereUsername($username)
+            ->whereIsPrivate(false)
+            ->firstOrFail();
+        if($profile->status != null) {
+            return ProfileController::accountCheck($profile);
+        }
         $obj = [
             '@context' => 'https://www.w3.org/ns/activitystreams',
             'id'       => $request->getUri(),

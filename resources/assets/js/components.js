@@ -2,10 +2,12 @@ window.Vue = require('vue');
 import BootstrapVue from 'bootstrap-vue'
 import InfiniteLoading from 'vue-infinite-loading';
 import Loading from 'vue-loading-overlay';
+import VueTimeago from 'vue-timeago';
 
 Vue.use(BootstrapVue);
 Vue.use(InfiniteLoading);
 Vue.use(Loading);
+Vue.use(VueTimeago);
 
 pixelfed.readmore = () => {
   $('.read-more').each(function(k,v) {
@@ -23,6 +25,13 @@ pixelfed.readmore = () => {
   });
 };
 
+try {
+    document.createEvent("TouchEvent");
+    $('body').addClass('touch');
+} catch (e) {
+    return false;
+}
+
 window.InfiniteScroll = require('infinite-scroll');
 window.filesize = require('filesize');
 window.Plyr = require('plyr');
@@ -34,8 +43,8 @@ require('./components/commentform');
 require('./components/searchform');
 require('./components/bookmarkform');
 require('./components/statusform');
-require('./components/embed');
-require('./components/notifications');
+//require('./components/embed');
+//require('./components/notifications');
 
 // import Echo from "laravel-echo"
 
@@ -53,8 +62,38 @@ require('./components/notifications');
 //     });
 // }
 
-// Initalize Notification Helper
+// Initialize Notification Helper
 window.pixelfed.n = {};
+
+Vue.component(
+    'photo-presenter',
+    require('./components/presenter/PhotoPresenter.vue')
+);
+
+Vue.component(
+    'video-presenter',
+    require('./components/presenter/VideoPresenter.vue')
+);
+
+Vue.component(
+    'photo-album-presenter',
+    require('./components/presenter/PhotoAlbumPresenter.vue')
+);
+
+Vue.component(
+    'video-album-presenter',
+    require('./components/presenter/VideoAlbumPresenter.vue')
+);
+
+Vue.component(
+    'mixed-album-presenter',
+    require('./components/presenter/MixedAlbumPresenter.vue')
+);
+
+// Vue.component(
+//     'micro',
+//     require('./components/Micro.vue')
+// );
 
 Vue.component(
     'follow-suggestions',
@@ -82,6 +121,11 @@ Vue.component(
 );
 
 Vue.component(
+    'timeline',
+    require('./components/Timeline.vue')
+);
+
+Vue.component(
     'passport-clients',
     require('./components/passport/Clients.vue')
 );
@@ -100,10 +144,10 @@ window.pixelfed.copyToClipboard = (str) => {
   const el = document.createElement('textarea');
   el.value = str;
   el.setAttribute('readonly', '');
-  el.style.position = 'absolute';                 
+  el.style.position = 'absolute';
   el.style.left = '-9999px';
   document.body.appendChild(el);
-  const selected = 
+  const selected =
     document.getSelection().rangeCount > 0
       ? document.getSelection().getRangeAt(0)
       : false;

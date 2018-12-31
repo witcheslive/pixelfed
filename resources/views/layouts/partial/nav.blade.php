@@ -2,7 +2,7 @@
     <div class="container">
         <a class="navbar-brand d-flex align-items-center" href="{{ route('timeline.personal') }}" title="Logo">
             <img src="/img/pixelfed-icon-color.svg" height="30px" class="px-2">
-            <span class="font-weight-bold mb-0 d-none d-sm-block" style="font-size:20px;">{{ config('app.name', 'Laravel') }}</span>
+            <span class="font-weight-bold mb-0 d-none d-sm-block" style="font-size:20px;">{{ config('app.name', 'pixelfed') }}</span>
         </a>
 
         <div class="collapse navbar-collapse" id="navbarSupportedContent">
@@ -19,33 +19,44 @@
                     <li><a class="nav-link font-weight-bold text-primary" href="{{ route('login') }}" title="Login">{{ __('Login') }}</a></li>
                     <li><a class="nav-link font-weight-bold" href="{{ route('register') }}" title="Register">{{ __('Register') }}</a></li>
                 @else
-                    <li class="nav-item pr-2">
-                        <a class="nav-link" href="{{route('discover')}}" title="Discover" data-toggle="tooltip" data-placement="bottom"><i class="far fa-compass fa-lg"></i></a>
+                    <li class="pr-md-2">
+                        <a class="nav-link font-weight-bold {{request()->is('/') ?'text-primary':''}}" href="/" title="Home Timeline">
+                        <span class="d-block d-md-none">
+                            <i class="fas fa-home fa-lg"></i>
+                        </span>
+                        <span class="d-none d-md-block">
+                            {{ __('Home') }}
+                        </span>
+                        </a>
                     </li>
-                    <li class="nav-item pr-2">
-                        <a class="nav-link" href="{{route('notifications')}}" title="Notifications" data-toggle="tooltip" data-placement="bottom"><i class="fas fa-inbox fa-lg text"></i></a>
+                    <li class="pr-md-2">
+                        <a class="nav-link font-weight-bold {{request()->is('timeline/public') ?'text-primary':''}}" href="/timeline/public" title="Local Timeline">
+                        <span class="d-block d-md-none">
+                            <i class="far fa-map fa-lg"></i>
+                        </span>
+                        <span class="d-none d-md-block">
+                            {{ __('Local') }}
+                        </span> 
+                        </a>
                     </li>
-                    {{-- <li class="nav-item dropdown d-none d-md-block pr-2">
-                        <a class="nav-link dropdown-toggle nav-notification" href="{{route('notifications')}}" id="nav-notification" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
-                            <i class="fas fa-inbox fa-lg text"></i>
-                      </a>
-                      <div class="dropdown-menu dropdown-menu-right nav-notification-dropdown" aria-labelledby="nav-notification">
-                        <div class="loader text-center">
-                            <div class="lds-ring"><div></div><div></div><div></div><div></div></div> 
-                        </div>
-                        <div class="dropdown-item disabled bg-light py-2">
-                            <a href="{{route('notifications')}}" class="font-weight-bold mr-4" data-toggle="tooltip" title="Notifications"><i class="fas fa-inbox"></i></a>
-                            {{-- <a href="#" class="text-muted font-weight-bold mr-4" data-toggle="tooltip" title="Direct Messages"><i class="far fa-envelope"></i></a>
-                            <a href="#" class="text-muted font-weight-bold mr-4" data-toggle="tooltip" title="Following Activity"><i class="fas fa-users"></i></a> -}}
-                            <a href="{{route('follow-requests')}}" class="text-muted font-weight-bold" data-toggle="tooltip" title="Follow Requests"><i class="fas fa-user-plus"></i></a>
-
-                            <span class="float-right">
-                                <a class="btn btn-sm btn-outline-secondary py-0 notification-action" data-type="mark_read" href="#">Mark as Read</a>
-                            </span>
-                        </div>
-                      </div>
+                    <li class="d-block d-md-none">
+                        <a class="nav-link" href="/account/activity">
+                            <i class="fas fa-inbox fa-lg"></i>
+                        </a>
+                    </li>
+                    {{-- <li class="pr-2">
+                        <a class="nav-link font-weight-bold" href="/" title="Home">
+                        {{ __('Network') }}
+                        </a>
                     </li> --}}
-                    <li class="nav-item pr-2">
+                    <li class="nav-item pr-md-2">
+                        <a class="nav-link font-weight-bold" href="{{route('discover')}}" title="Discover" data-toggle="tooltip" data-placement="bottom">
+                        <span class="d-none d-md-block">
+                            {{ __('Discover')}}</i>
+                        </span>
+                        </a>
+                    </li>
+                    <li class="nav-item pr-md-2">
                         <div title="Create new post" data-toggle="tooltip" data-placement="bottom">
                             <a href="{{route('compose')}}" class="nav-link" data-toggle="modal" data-target="#composeModal">
                               <i class="fas fa-camera-retro fa-lg text-primary"></i>
@@ -59,18 +70,23 @@
 
                         <div class="dropdown-menu dropdown-menu-right" aria-labelledby="navbarDropdown">
                             <a class="dropdown-item font-weight-ultralight text-truncate" href="{{Auth::user()->url()}}">
-                                <img class="img-thumbnail rounded-circle pr-1" src="{{Auth::user()->profile->avatarUrl()}}" width="32px">
+                                <img class="rounded-circle box-shadow mr-1" src="{{Auth::user()->profile->avatarUrl()}}" width="26px" height="26px">
                                 &commat;{{Auth::user()->username}}
-                                <p class="small mb-0 text-muted">{{__('navmenu.viewMyProfile')}}</p>
+                                <p class="small mb-0 text-muted text-center">{{__('navmenu.viewMyProfile')}}</p>
                             </a>
                             <div class="dropdown-divider"></div>
                             <a class="dropdown-item font-weight-bold" href="{{route('timeline.personal')}}">
-                                <span class="fas fa-list-alt pr-1"></span>
+                                <span class="fas fa-home pr-1"></span>
                                 {{__('navmenu.myTimeline')}}
                             </a>
                             <a class="dropdown-item font-weight-bold" href="{{route('timeline.public')}}">
-                                <span class="far fa-list-alt pr-1"></span>
+                                <span class="far fa-map pr-1"></span>
                                 {{__('navmenu.publicTimeline')}}
+                            </a>
+
+                            <a class="d-block d-md-none dropdown-item font-weight-bold" href="{{route('discover')}}">
+                                <span class="far fa-compass pr-1"></span>
+                                {{__('Discover')}}
                             </a>
                             {{-- <a class="dropdown-item font-weight-bold" href="{{route('messages')}}">
                                 <span class="far fa-envelope pr-1"></span>

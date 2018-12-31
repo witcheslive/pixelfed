@@ -21,9 +21,21 @@ class StatusController extends Controller
     {
         $user = Profile::whereUsername($username)->firstOrFail();
 
+        if($user->status != null) {
+            return ProfileController::accountCheck($user);
+        }
+
         $status = Status::whereProfileId($user->id)
                 ->whereNotIn('visibility',['draft','direct'])
                 ->findOrFail($id);
+
+        if($status->uri) {
+            $url = $status->uri;
+            if(ends_with($url, '/activity')) {
+                $url = str_replace('/activity', '', $url);
+            }
+            return redirect($url);
+        }
 
         if($status->visibility == 'private' || $user->is_private) {
             if(!Auth::check()) {
@@ -279,7 +291,7 @@ class StatusController extends Controller
         $photos = 0;
         $videos = 0;
         foreach($mimes as $mime) {
-            if(in_array($mime, $allowed) == false) {
+            if(in_array($mime, $allowed) == false && $mime !== 'video/mp4') {
                 continue;
             }
             if(str_contains($mime, 'image/')) {

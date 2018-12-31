@@ -38,10 +38,9 @@ class NewStatusPipeline implements ShouldQueue
 
         StatusEntityLexer::dispatch($status);
         StatusActivityPubDeliver::dispatch($status);
-
-        Cache::forever('post.'.$status->id, $status);
-
-        $redis = Redis::connection();
-        $redis->lpush(config('cache.prefix').':user.'.$status->profile_id.'.posts', $status->id);
+        
+        // Cache::forever('post.'.$status->id, $status);
+        // $redis = Redis::connection();
+        // $redis->lpush(config('cache.prefix').':user.'.$status->profile_id.'.posts', $status->id);
     }
 }

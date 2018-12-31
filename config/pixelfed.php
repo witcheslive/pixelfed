@@ -23,7 +23,7 @@ return [
     | This value is the version of your PixelFed instance.
     |
     */
-    'version' => '0.4.3',
+    'version' => '0.7.7',
 
     /*
     |--------------------------------------------------------------------------
@@ -59,7 +59,7 @@ return [
     */
     'restricted_names' => [
       'reserved_routes' => true,
-      'use_blacklist'   => false,
+      'use_blacklist'   => env('USERNAME_BLACKLIST', false),
     ],
 
     /*
@@ -106,6 +106,16 @@ return [
     |
     */
     'max_photo_size' => env('MAX_PHOTO_SIZE', 15000),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Avatar file size limit
+    |--------------------------------------------------------------------------
+    |
+    | Update the max avatar size, in KB.
+    |
+    */
+    'max_avatar_size' => (int) env('MAX_AVATAR_SIZE', 2000),
 
     /*
     |--------------------------------------------------------------------------

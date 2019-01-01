@@ -14,6 +14,7 @@ use Auth;
 use Cache;
 use Illuminate\Http\Request;
 use League\Fractal;
+use \Log;
 
 class StatusController extends Controller
 {
@@ -67,11 +68,15 @@ class StatusController extends Controller
         $this->authCheck();
         $user = Auth::user();
 
+        Log::alert("new post by " . $user->name);
+
         $size = Media::whereUserId($user->id)->sum('size') / 1000;
         $limit = (int) config('pixelfed.max_account_size');
         if ($size >= $limit) {
             return redirect()->back()->with('error', 'You have exceeded your storage limit. Please click <a href="#">here</a> for more info.');
         }
+
+        Log::alert($user->name . " has enough storage for their post!");
 
         $this->validate($request, [
           'photo.*'      => 'required|mimetypes:' . config('pixelfed.media_types').'|max:' . config('pixelfed.max_photo_size'),
@@ -85,6 +90,7 @@ class StatusController extends Controller
         if (count($request->file('photo')) > config('pixelfed.max_album_length')) {
             return redirect()->back()->with('error', 'Too many files, max limit per post: '.config('pixelfed.max_album_length'));
         }
+        Log::alert($user->name . "'s post doesn't have too many files!");
         $cw = $request->filled('cw') && $request->cw == 'on' ? true : false;
         $monthHash = hash('sha1', date('Y').date('m'));
         $userHash = hash('sha1', $user->id.(string) $user->created_at);
@@ -100,7 +106,9 @@ class StatusController extends Controller
         $status->visibility = $visibility;
         $status->scope = $visibility;
 
+        Log::alert("Saving " . $user->name . "'s status");
         $status->save();
+        Log::alert($user->name . "'s status has been saved!");
 
         $photos = $request->file('photo');
         $order = 1;

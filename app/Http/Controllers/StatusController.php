@@ -9,6 +9,7 @@ use App\Media;
 use App\Profile;
 use App\Status;
 use App\Transformer\ActivityPub\StatusTransformer;
+use App\Transformer\ActivityPub\Verb\Note;
 use App\User;
 use Auth;
 use Cache;
@@ -55,6 +56,39 @@ class StatusController extends Controller
         return view($template, compact('user', 'status'));
     }
 
+    public function showObject(Request $request, $username, int $id)
+    {
+        $user = Profile::whereNull('domain')->whereUsername($username)->firstOrFail();
+
+        if($user->status != null) {
+            return ProfileController::accountCheck($user);
+        }
+
+        $status = Status::whereProfileId($user->id)
+                ->whereNotIn('visibility',['draft','direct'])
+                ->findOrFail($id);
+
+        if($status->uri) {
+            $url = $status->uri;
+            if(ends_with($url, '/activity')) {
+                $url = str_replace('/activity', '', $url);
+            }
+            return redirect($url);
+        }
+
+        if($status->visibility == 'private' || $user->is_private) {
+            if(!Auth::check()) {
+                abort(403);
+            }
+            $pid = Auth::user()->profile;
+            if($user->followedBy($pid) == false && $user->id !== $pid->id) {
+                abort(403);
+            }
+        }
+
+        return $this->showActivityPub($request, $status);
+    }
+
     public function compose()
     {
         $this->authCheck();
@@ -90,6 +124,9 @@ class StatusController extends Controller
         $userHash = hash('sha1', $user->id.(string) $user->created_at);
         $profile = $user->profile;
         $visibility = $this->validateVisibility($request->visibility);
+
+        $cw = $profile->cw == true ? true : $cw;
+        $visibility = $profile->unlisted == true && $visibility == 'public' ? 'unlisted' : $visibility;
 
         $status = new Status();
         $status->profile_id = $profile->id;
@@ -213,7 +250,7 @@ class StatusController extends Controller
     public function showActivityPub(Request $request, $status)
     {
         $fractal = new Fractal\Manager();
-        $resource = new Fractal\Resource\Item($status, new StatusTransformer());
+        $resource = new Fractal\Resource\Item($status, new Note());
         $res = $fractal->createData($resource)->toArray();
 
         return response(json_encode($res['data']))->header('Content-Type', 'application/activity+json');

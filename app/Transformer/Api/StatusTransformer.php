@@ -4,6 +4,7 @@ namespace App\Transformer\Api;
 
 use App\Status;
 use League\Fractal;
+use Cache;
 
 class StatusTransformer extends Fractal\TransformerAbstract
 {

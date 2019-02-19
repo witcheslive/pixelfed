@@ -174,12 +174,13 @@ class PublicApiController extends Controller
         switch ($status->scope) {
             case 'public':
             case 'unlisted':
+                break;
             case 'private':
                 $user = Auth::check() ? Auth::user() : false;
-                if($user && $profile->is_private) {
-                    $follows = Follower::whereProfileId($user->profile->id)
-                        ->whereFollowingId($profile->id)
-                        ->exists();
+                if(!$user) {
+                    abort(403);
+                } else {
+                    $follows = $profile->followedBy(Auth::user()->profile);
                     if($follows == false && $profile->id !== $user->profile->id) {
                         abort(404);
                     }
@@ -216,7 +217,7 @@ class PublicApiController extends Controller
         $page = $request->input('page');
         $min = $request->input('min_id');
         $max = $request->input('max_id');
-        $limit = $request->input('limit') ?? 10;
+        $limit = $request->input('limit') ?? 5;
 
         // TODO: Use redis for timelines
         // $timeline = Timeline::build()->local();
@@ -236,7 +237,22 @@ class PublicApiController extends Controller
         if($min || $max) {
             $dir = $min ? '>' : '<';
             $id = $min ?? $max;
-            $timeline = Status::whereHas('media')
+            $timeline = Status::select(
+                        'id', 
+                        'uri',
+                        'caption',
+                        'rendered',
+                        'profile_id', 
+                        'type',
+                        'in_reply_to_id',
+                        'reblog_of_id',
+                        'is_nsfw',
+                        'scope',
+                        'local',
+                        'created_at',
+                        'updated_at'
+                      )
+                      ->whereHas('media')
                       ->whereLocal(true)
                       ->whereNull('uri')
                       ->where('id', $dir, $id)
@@ -283,7 +299,7 @@ class PublicApiController extends Controller
         $page = $request->input('page');
         $min = $request->input('min_id');
         $max = $request->input('max_id');
-        $limit = $request->input('limit') ?? 10;
+        $limit = $request->input('limit') ?? 5;
 
         // TODO: Use redis for timelines
         // $timeline = Timeline::build()->local();
@@ -302,7 +318,22 @@ class PublicApiController extends Controller
         if($min || $max) {
             $dir = $min ? '>' : '<';
             $id = $min ?? $max;
-            $timeline = Status::whereHas('media')
+            $timeline = Status::select(
+                        'id', 
+                        'uri',
+                        'caption',
+                        'rendered',
+                        'profile_id', 
+                        'type',
+                        'in_reply_to_id',
+                        'reblog_of_id',
+                        'is_nsfw',
+                        'scope',
+                        'local',
+                        'created_at',
+                        'updated_at'
+                      )
+                      ->whereHas('media')
                       ->whereLocal(true)
                       ->whereNull('uri')
                       ->where('id', $dir, $id)
@@ -400,7 +431,14 @@ class PublicApiController extends Controller
         $only_media = $request->only_media ?? false;
         $user = Auth::user();
         $account = Profile::findOrFail($id);
-        $statuses = $account->statuses()->getQuery()->whereNull('uri'); 
+        $statuses = $account->statuses()
+            ->getQuery()
+            ->whereNull('uri');
+        if(!$user || $user->profile->id != $account->id && !$user->profile->follows($account)) {
+            $statuses = $statuses->whereVisibility('public');
+        } else {
+            $statuses = $statuses->whereIn('visibility', ['public', 'unlisted', 'private']);
+        }
         if($only_media == true) {
             $statuses = $statuses
                 ->whereHas('media')
@@ -423,7 +461,7 @@ class PublicApiController extends Controller
                 ->orderBy('id', 'DESC')
                 ->paginate($limit);
         } else {
-            $statuses = $statuses->whereVisibility('public')->orderBy('id', 'desc')->paginate($limit);
+            $statuses = $statuses->orderBy('id', 'desc')->paginate($limit);
         }
         $resource = new Fractal\Resource\Collection($statuses, new StatusTransformer());
         $res = $this->fractal->createData($resource)->toArray();
